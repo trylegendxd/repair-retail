@@ -1,0 +1,32 @@
+RepairTrace Complete — 13 August 2026
+
+repairtrace-workshop/
+  Latest saved source for the RepairTrace shop/workshop application.
+  Includes app routes and UI, database schema, all migrations, tests, assets,
+  iFixit/AI logic, customer tracking, email/SMS integration points,
+  certificates, quotes, invoices, inventory and operations tools.
+
+repairtrace-find/
+  Latest saved source for the customer/provider marketplace.
+  Includes public price search, accounts, announcements, photos, nearby
+  opportunities, offers, PWA assets, database schema/migrations, tests and the
+  generated 26,000+ device catalogue plus its official-source update script.
+
+android-wrapper/
+  Android Studio source for rebuilding a RepairTrace Find APK/AAB.
+
+HANDOFF-GUIDE.md
+  Full architecture, setup, integrations, safety rules and next steps.
+
+FABLE-5-GUIDE.md
+  Step-by-step instructions for using the package with Claude Code/Fable 5.
+
+FABLE-5-STARTER-PROMPT.md
+  Ready-to-paste first prompt for Fable 5.
+
+CLAUDE.md
+  Persistent project rules Claude Code reads from the package root.
+
+Excluded intentionally:
+  node_modules, build caches, Git internals/remotes, production databases,
+  customer photos/data, sessions, API credentials and Android signing keys.

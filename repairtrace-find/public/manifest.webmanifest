@@ -1,0 +1,13 @@
+{
+  "name": "RepairTrace Find",
+  "short_name": "RT Find",
+  "description": "Check repair prices, post a device problem and compare offers from nearby electronics providers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ea",
+  "theme_color": "#10251d",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

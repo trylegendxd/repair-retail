@@ -5,6 +5,7 @@ import { clean, getD1 } from "@/lib/server-marketplace";
 export async function PATCH(request:Request,context:{params:Promise<{id:string}>}){
   try{
     if(!isSameOriginMutation(request))return NextResponse.json({error:"This request was blocked for your protection."},{status:403,headers:privateHeaders});
+    const declaredLength=Number(request.headers.get("content-length")||0);if(declaredLength>100_000)return NextResponse.json({error:"Request too large."},{status:413,headers:privateHeaders});
     const {account}=await accountForRequest(request);if(!account)return NextResponse.json({error:"Sign in first."},{status:401,headers:privateHeaders});if(account.role!=="customer")return NextResponse.json({error:"Only customers can manage repair posts."},{status:403,headers:privateHeaders});
     const {id}=await context.params;const postId=clean(id,100);const body=await request.json() as Record<string,unknown>;const action=clean(body.action,20);if(action!=="close"&&action!=="reopen")return NextResponse.json({error:"Choose close or reopen."},{status:400,headers:privateHeaders});
     const db=getD1();const post=await db.prepare("SELECT status,accepted_offer_id FROM repair_announcements WHERE id=? AND owner_account_id=? LIMIT 1").bind(postId,account.id).first<{status:string;accepted_offer_id:string|null}>();if(!post)return NextResponse.json({error:"Repair post not found."},{status:404,headers:privateHeaders});

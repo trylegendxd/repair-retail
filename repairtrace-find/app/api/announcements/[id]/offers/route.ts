@@ -9,6 +9,7 @@ function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){const radia
 export async function POST(request:Request,context:{params:Promise<{id:string}>}){
   try{
     if(!isSameOriginMutation(request))return NextResponse.json({error:"This request was blocked for your protection."},{status:403,headers:privateHeaders});
+    const declaredLength=Number(request.headers.get("content-length")||0);if(declaredLength>1_000_000)return NextResponse.json({error:"Offer information is too large."},{status:413,headers:privateHeaders});
     const {account}=await accountForRequest(request);if(!account)return NextResponse.json({error:"Sign in and finish provider registration first."},{status:401,headers:privateHeaders});if(account.role!=="provider")return NextResponse.json({error:"Only provider accounts can send offers."},{status:403,headers:privateHeaders});
     const {id}=await context.params;const announcementId=clean(id,100);const body=await request.json() as Record<string,unknown>;const offerType=clean(body.offerType,20)||"repair";const priceLow=Number(body.priceLow),priceHigh=Number(body.priceHigh);const estimatedDays=Math.min(60,Math.max(0,Math.round(Number(body.estimatedDays)||0)));const message=clean(body.message,1200);
     if(!offerTypes.includes(offerType)||!Number.isFinite(priceLow)||!Number.isFinite(priceHigh)||priceLow<0||priceHigh<priceLow||priceHigh>1_000_000||message.length<10)return NextResponse.json({error:"Add a valid help type, price range and a useful message."},{status:400,headers:privateHeaders});

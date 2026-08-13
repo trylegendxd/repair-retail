@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { accountForRequest, accountRoles, isSameOriginMutation, mapAccount, privateHeaders, providerKinds } from "@/lib/account-auth";
 import { countries } from "@/lib/repair-catalog";
 import { clean, getD1, uid } from "@/lib/server-marketplace";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const phonePattern=/^[+()\d\s.-]{0,24}$/;
 
@@ -19,9 +20,10 @@ export async function GET(request:Request){
 export async function POST(request:Request){
   try{
     if(!isSameOriginMutation(request))return NextResponse.json({error:"This request was blocked for your protection."},{status:403,headers:privateHeaders});
+    const {user,account}=await accountForRequest(request);
+    if(user){const {allowed}=await checkRateLimit(user.email,10,3600);if(!allowed)return NextResponse.json({error:"Too many account updates. Please wait before trying again."},{status:429,headers:privateHeaders});}
     const declaredLength=Number(request.headers.get("content-length")||0);
     if(declaredLength>30_000)return NextResponse.json({error:"Profile information is too large."},{status:413,headers:privateHeaders});
-    const {user,account}=await accountForRequest(request);
     if(!user)return NextResponse.json({error:"Sign in to create a RepairTrace account."},{status:401,headers:privateHeaders});
     const rawBody=await request.text();
     if(new TextEncoder().encode(rawBody).byteLength>30_000)return NextResponse.json({error:"Profile information is too large."},{status:413,headers:privateHeaders});

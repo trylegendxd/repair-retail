@@ -36,6 +36,13 @@
       "when": 1723585200000,
       "tag": "0004_add_foreign_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1723585201000,
+      "tag": "0005_add_rate_limiting",
+      "breakpoints": true
     }
   ]
 }

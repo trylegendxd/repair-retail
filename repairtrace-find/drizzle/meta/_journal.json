@@ -50,6 +50,13 @@
       "when": 1723672800000,
       "tag": "0006_seller_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1723672900000,
+      "tag": "0007_auth_system",
+      "breakpoints": true
     }
   ]
 }

@@ -15,8 +15,9 @@ export async function GET(request: Request) {
 
     const db = getD1();
 
-    // Build query prioritizing verified shops
-    let query = `
+    // Verified shops rank first, followed by individual sellers and then
+    // unverified providers. Aggregate filters belong in HAVING, not WHERE.
+    const query = `
       SELECT
         a.id, a.display_name, a.city, a.region, a.latitude, a.longitude,
         a.seller_type, a.is_verified, a.trust_score, a.total_repairs, a.successful_repairs,
@@ -33,22 +34,19 @@ export async function GET(request: Request) {
       LEFT JOIN seller_ratings r ON a.id = r.seller_account_id
       WHERE a.role = 'provider'
         AND a.country_code = ?
-        ${verified ? "AND a.is_verified = 1" : ""}
-        ${minRating > 0 ? "AND COALESCE(AVG(r.rating), 0) >= ?" : ""}
+        AND (? = 0 OR a.is_verified = 1)
       GROUP BY a.id
+      HAVING (? = 0 OR COALESCE(AVG(r.rating), 0) >= ?)
       ORDER BY priority ASC, a.trust_score DESC, average_rating DESC
-      LIMIT 100
+      LIMIT 300
     `;
 
-    const params: unknown[] = [account.countryCode];
-    if (minRating > 0) params.push(minRating);
-
-    const result = await db.prepare(query).bind(...params).all<Record<string, unknown>>();
+    const result = await db.prepare(query).bind(account.countryCode,verified?1:0,minRating,minRating).all<Record<string, unknown>>();
 
     const sellers = (result.results || []).map(row => {
-      const lat = row.latitude ? Number(row.latitude) : null;
-      const lng = row.longitude ? Number(row.longitude) : null;
-      const distance = lat && lng && account.latitude && account.longitude
+      const lat = row.latitude===null||row.latitude===undefined?null:Number(row.latitude);
+      const lng = row.longitude===null||row.longitude===undefined?null:Number(row.longitude);
+      const distance = lat!==null&&lng!==null&&account.latitude!==null&&account.longitude!==null
         ? Math.round(distanceKm(account.latitude, account.longitude, lat, lng) * 10) / 10
         : null;
 
@@ -57,7 +55,7 @@ export async function GET(request: Request) {
 
       return {
         id: String(row.id),
-        name: row.seller_type === "shop" ? String(row.business_name) : String(row.display_name),
+        name: row.seller_type === "shop" ? String(row.business_name||row.display_name) : String(row.display_name),
         sellerType: String(row.seller_type),
         badge,
         isVerified: row.is_verified === 1,
@@ -68,11 +66,13 @@ export async function GET(request: Request) {
         averageRating: Number(row.average_rating),
         totalRatings: Number(row.total_ratings),
         successRate: row.total_repairs ? (Number(row.successful_repairs) / Number(row.total_repairs) * 100) : 0,
-        specializations: row.specializations ? JSON.parse(String(row.specializations)) : [],
+        specializations: safeStringArray(row.specializations),
         turnaroundDays: Number(row.average_turnaround_days) || 3,
         warranty: Number(row.warranty_offered) || 0
       };
-    }).filter(s => !distance || s.distanceKm === null || s.distanceKm <= radius);
+    }).filter(s=>s.distanceKm===null||s.distanceKm<=radius)
+      .filter(s=>!category||s.specializations.some(item=>item.toLowerCase()===category.toLowerCase()))
+      .slice(0,100);
 
     return NextResponse.json({
       sellers,
@@ -87,6 +87,11 @@ export async function GET(request: Request) {
     console.error("seller search failed", error);
     return NextResponse.json({ error: "Search failed" }, { status: 500, headers: privateHeaders });
   }
+}
+
+function safeStringArray(value:unknown):string[]{
+  if(!value)return [];
+  try{const parsed=JSON.parse(String(value));return Array.isArray(parsed)?parsed.filter(item=>typeof item==="string").slice(0,30):[];}catch{return [];}
 }
 
 function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): number {

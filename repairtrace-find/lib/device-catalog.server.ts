@@ -6,8 +6,13 @@ export type CatalogDevice=DeviceModel&{source:"repairtrace"|"google-play"};
 function normalize(value:string){return value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
 
 const curatedLabels=new Set(deviceModels.map(model=>`${normalize(model.label)}|${model.category}`));
+const sourceAliases=new Map<string,string[]>();
+for(const model of googlePlayDevices){
+  const key=`${normalize(model.label)}|${model.category}`;
+  sourceAliases.set(key,[...new Set([...(sourceAliases.get(key)??[]),...model.aliases])]);
+}
 const combined:CatalogDevice[]=[
-  ...deviceModels.map(model=>({...model,source:"repairtrace" as const})),
+  ...deviceModels.map(model=>({...model,aliases:[...new Set([...(model.aliases??[]),...(sourceAliases.get(`${normalize(model.label)}|${model.category}`)??[])])],source:"repairtrace" as const})),
   ...googlePlayDevices.filter(model=>!curatedLabels.has(`${normalize(model.label)}|${model.category}`)),
 ];
 const indexed=combined.map((model,index)=>{

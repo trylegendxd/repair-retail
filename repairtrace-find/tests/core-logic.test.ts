@@ -25,6 +25,7 @@ test("the source-backed catalogue covers tens of thousands of additional devices
   assert.ok(deviceCatalogSize>=20_000);
   const pixel=searchAllDeviceModels("Pixel 10a",5).find(model=>model.label.includes("Pixel 10a"));
   assert.equal(pixel?.source,"google-play");
+  assert.equal(searchAllDeviceModels("SM-S921E",5)[0]?.label,"Samsung Galaxy S24");
 });
 
 test("free-form customer problems are classified only into compatible repairs",()=>{

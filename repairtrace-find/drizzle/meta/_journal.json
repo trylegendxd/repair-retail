@@ -43,6 +43,13 @@
       "when": 1723585201000,
       "tag": "0005_add_rate_limiting",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1723672800000,
+      "tag": "0006_seller_verification",
+      "breakpoints": true
     }
   ]
 }

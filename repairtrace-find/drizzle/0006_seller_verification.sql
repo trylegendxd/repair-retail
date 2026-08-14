@@ -17,6 +17,15 @@ ALTER TABLE marketplace_accounts ADD COLUMN trust_score REAL NOT NULL DEFAULT 0.
 ALTER TABLE marketplace_accounts ADD COLUMN total_repairs INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE marketplace_accounts ADD COLUMN successful_repairs INTEGER NOT NULL DEFAULT 0;
 
+-- Existing providers predate seller types. Preserve their role and classify
+-- independent technicians separately from shop/business providers.
+UPDATE marketplace_accounts
+SET seller_type = CASE
+  WHEN role <> 'provider' THEN 'customer'
+  WHEN provider_kind = 'independent_technician' THEN 'individual_seller'
+  ELSE 'shop'
+END;
+
 -- Create seller verification documents table
 CREATE TABLE seller_verification_docs (
   id TEXT NOT NULL PRIMARY KEY,
@@ -26,7 +35,7 @@ CREATE TABLE seller_verification_docs (
   object_key TEXT NOT NULL,
   file_name TEXT NOT NULL,
   content_type TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
   -- status: 'pending', 'approved', 'rejected'
   rejection_reason TEXT,
   uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -55,7 +64,7 @@ CREATE TABLE shop_profiles (
   -- JSON array of specializations: ["phone", "laptop", "console", ...]
   service_area_radius_km INTEGER NOT NULL DEFAULT 50,
   average_turnaround_days REAL,
-  warranty_offered INTEGER NOT NULL DEFAULT 0,
+  warranty_offered INTEGER NOT NULL DEFAULT 0 CHECK(warranty_offered BETWEEN 0 AND 24),
   -- warranty_offered: months (0-24)
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -64,13 +73,27 @@ CREATE TABLE shop_profiles (
 
 CREATE INDEX shop_profiles_account_idx ON shop_profiles(account_id);
 
+INSERT OR IGNORE INTO shop_profiles (id, account_id, business_name, business_type)
+SELECT
+  'shop_' || lower(hex(randomblob(12))),
+  id,
+  CASE WHEN length(trim(business_name)) > 0 THEN business_name ELSE display_name END,
+  CASE provider_kind
+    WHEN 'repair_shop' THEN 'electronics_repair'
+    WHEN 'parts_seller' THEN 'electronics_parts'
+    WHEN 'goods_services' THEN 'goods_services'
+    ELSE 'general'
+  END
+FROM marketplace_accounts
+WHERE role = 'provider' AND seller_type = 'shop';
+
 -- Create seller ratings/reviews table
 CREATE TABLE seller_ratings (
   id TEXT NOT NULL PRIMARY KEY,
   seller_account_id TEXT NOT NULL,
   customer_account_id TEXT NOT NULL,
   offer_id TEXT,
-  rating INTEGER NOT NULL,
+  rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
   -- rating: 1-5 stars
   comment TEXT,
   categories TEXT,
@@ -83,6 +106,7 @@ CREATE TABLE seller_ratings (
 
 CREATE INDEX seller_ratings_seller_idx ON seller_ratings(seller_account_id);
 CREATE INDEX seller_ratings_customer_idx ON seller_ratings(customer_account_id);
+CREATE UNIQUE INDEX seller_ratings_customer_offer_unique ON seller_ratings(customer_account_id, offer_id);
 
 -- Update repair_offers to track completed status for ratings
 ALTER TABLE repair_offers ADD COLUMN completion_status TEXT DEFAULT 'pending';

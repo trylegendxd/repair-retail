@@ -38,6 +38,7 @@ export async function POST(request:Request){
     const businessName=clean(body.businessName,120);
     const bio=clean(body.bio,500);
     const serviceRadiusKm=Math.min(250,Math.max(2,Math.round(Number(body.serviceRadiusKm)||50)));
+    const sellerType=role==="provider"?(providerKind==="independent_technician"?"individual_seller":"shop"):"customer";
     const hasLatitude=body.latitude!==undefined&&body.latitude!==null&&body.latitude!=="";
     const hasLongitude=body.longitude!==undefined&&body.longitude!==null&&body.longitude!=="";
     const latitude=hasLatitude?Number(body.latitude):null;
@@ -51,17 +52,22 @@ export async function POST(request:Request){
 
     const db=getD1();
     if(account){
-      await db.prepare("UPDATE marketplace_accounts SET display_name=?,phone=?,city=?,region=?,country_code=?,latitude=?,longitude=?,provider_kind=?,business_name=?,bio=?,service_radius_km=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .bind(displayName,phone,city,region,countryCode,latitude,longitude,role==="provider"?providerKind:"",role==="provider"?businessName:"",role==="provider"?bio:"",serviceRadiusKm,account.id).run();
+      await db.prepare("UPDATE marketplace_accounts SET display_name=?,phone=?,city=?,region=?,country_code=?,latitude=?,longitude=?,provider_kind=?,business_name=?,bio=?,service_radius_km=?,seller_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .bind(displayName,phone,city,region,countryCode,latitude,longitude,role==="provider"?providerKind:"",role==="provider"?businessName:"",role==="provider"?bio:"",serviceRadiusKm,sellerType,account.id).run();
     }else{
-      await db.prepare("INSERT OR IGNORE INTO marketplace_accounts (id,email,role,display_name,phone,city,region,country_code,latitude,longitude,provider_kind,business_name,bio,service_radius_km) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(uid("account"),user.email,role,displayName,phone,city,region,countryCode,latitude,longitude,role==="provider"?providerKind:"",role==="provider"?businessName:"",role==="provider"?bio:"",serviceRadiusKm).run();
+      await db.prepare("INSERT OR IGNORE INTO marketplace_accounts (id,email,role,display_name,phone,city,region,country_code,latitude,longitude,provider_kind,business_name,bio,service_radius_km,seller_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(uid("account"),user.email,role,displayName,phone,city,region,countryCode,latitude,longitude,role==="provider"?providerKind:"",role==="provider"?businessName:"",role==="provider"?bio:"",serviceRadiusKm,sellerType).run();
       const created=await db.prepare("SELECT role FROM marketplace_accounts WHERE email=? LIMIT 1").bind(user.email).first<{role:string}>();
       if(!created)throw new Error("ACCOUNT_CREATE_FAILED");
       if(created.role!==role)return NextResponse.json({error:"This signed-in email already has a different account type. Sign in with another email for a separate role."},{status:409,headers:privateHeaders});
     }
-    const updated=await db.prepare("SELECT id,role,display_name,phone,city,region,country_code,latitude,longitude,provider_kind,business_name,bio,service_radius_km FROM marketplace_accounts WHERE email=? LIMIT 1").bind(user.email).first<Record<string,unknown>>();
+    const updated=await db.prepare("SELECT id,role,display_name,phone,city,region,country_code,latitude,longitude,provider_kind,business_name,bio,service_radius_km,seller_type,is_verified,verification_status,trust_score FROM marketplace_accounts WHERE email=? LIMIT 1").bind(user.email).first<Record<string,unknown>>();
     if(!updated)throw new Error("ACCOUNT_LOOKUP_FAILED");
+    if(role==="provider"&&sellerType==="shop"){
+      const businessType=providerKind==="repair_shop"?"electronics_repair":providerKind==="parts_seller"?"electronics_parts":providerKind==="goods_services"?"goods_services":"general";
+      await db.prepare("INSERT INTO shop_profiles (id,account_id,business_name,business_type,service_area_radius_km) VALUES (?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET business_name=excluded.business_name,business_type=excluded.business_type,service_area_radius_km=excluded.service_area_radius_km,updated_at=CURRENT_TIMESTAMP")
+        .bind(uid("shop"),String(updated.id),businessName,businessType,serviceRadiusKm).run();
+    }
     return NextResponse.json({ok:true,profile:mapAccount(updated)},{status:account?200:201,headers:privateHeaders});
   }catch(error){
     console.error("account save failed",error);

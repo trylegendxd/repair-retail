@@ -1,29 +1,50 @@
 /**
- * Cloudflare R2 S3-Compatible REST API Client
- * Replaces Worker binding when running on standard Node.js/Vercel
- * Uses S3-compatible API that R2 provides
+ * Cloudflare R2 client over the S3-compatible API with AWS Signature V4.
+ * Mirrors the Worker-binding R2Bucket surface used by the route handlers:
+ * put(), get() returning { body, size }, delete() accepting one key or many.
  */
 
-interface R2Object {
-  key: string;
-  size: number;
-  etag?: string;
-  uploaded?: Date;
-}
+import { createHash, createHmac } from "node:crypto";
 
 interface R2HTTPMetadata {
   contentType?: string;
   cacheControl?: string;
   contentDisposition?: string;
-  [key: string]: unknown;
+}
+
+export interface R2ObjectBody {
+  key: string;
+  body: Uint8Array;
+  size: number;
+  etag?: string;
+  httpMetadata: R2HTTPMetadata;
+}
+
+const UNRESERVED = /[A-Za-z0-9\-._~]/;
+
+function encodeRfc3986Segment(segment: string): string {
+  let out = "";
+  for (const char of segment) {
+    out += UNRESERVED.test(char)
+      ? char
+      : Array.from(new TextEncoder().encode(char), (b) => `%${b.toString(16).toUpperCase().padStart(2, "0")}`).join("");
+  }
+  return out;
+}
+
+function sha256Hex(data: Uint8Array | string): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+function hmac(key: Buffer | string, data: string): Buffer {
+  return createHmac("sha256", key).update(data).digest();
 }
 
 export class CloudflareR2API {
-  private accountId: string;
-  private accessKeyId: string;
-  private secretAccessKey: string;
-  private bucketName: string;
-  private s3Endpoint: string;
+  private readonly accessKeyId: string;
+  private readonly secretAccessKey: string;
+  private readonly bucketName: string;
+  private readonly host: string;
 
   constructor(config: {
     accountId: string;
@@ -31,213 +52,111 @@ export class CloudflareR2API {
     secretAccessKey: string;
     bucketName: string;
   }) {
-    if (
-      !config.accountId ||
-      !config.accessKeyId ||
-      !config.secretAccessKey ||
-      !config.bucketName
-    ) {
-      throw new Error(
-        "CloudflareR2API requires accountId, accessKeyId, secretAccessKey, and bucketName"
-      );
+    if (!config.accountId || !config.accessKeyId || !config.secretAccessKey || !config.bucketName) {
+      throw new Error("CloudflareR2API requires accountId, accessKeyId, secretAccessKey, and bucketName");
     }
-
-    this.accountId = config.accountId;
     this.accessKeyId = config.accessKeyId;
     this.secretAccessKey = config.secretAccessKey;
     this.bucketName = config.bucketName;
-
-    // R2 S3-compatible endpoint
-    this.s3Endpoint = `https://${this.accountId}.r2.cloudflarestorage.com`;
+    this.host = `${config.accountId}.r2.cloudflarestorage.com`;
   }
 
-  private signRequest(
+  private async signedFetch(
     method: string,
-    path: string,
-    headers: Record<string, string>
-  ): Record<string, string> {
-    // For simplicity, using AWS Signature Version 4
-    // In production, consider using AWS SDK or similar library
-    const crypto = require("crypto");
+    key: string,
+    body?: Uint8Array,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<Response> {
+    const canonicalPath = `/${encodeRfc3986Segment(this.bucketName)}/${key.split("/").map(encodeRfc3986Segment).join("/")}`;
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, ""); // YYYYMMDDTHHMMSSZ
+    const dateStamp = amzDate.slice(0, 8);
+    const region = "auto";
+    const service = "s3";
+    const payloadHash = sha256Hex(body ?? "");
 
-    const amzDate = new Date().toISOString().replace(/[:-]/g, "").split(".")[0] + "Z";
-    const dateStamp = amzDate.split("T")[0];
-
-    const canonicalRequest = [
-      method,
-      path,
-      "",
-      Object.entries(headers)
-        .map(([k, v]) => `${k.toLowerCase()}:${v}`)
-        .join("\n"),
-      "",
-      Object.keys(headers)
-        .map((k) => k.toLowerCase())
-        .sort()
-        .join(";"),
-      "UNSIGNED-PAYLOAD",
-    ].join("\n");
-
-    const canonicalRequestHash = crypto
-      .createHash("sha256")
-      .update(canonicalRequest)
-      .digest("hex");
-
-    const stringToSign = [
-      "AWS4-HMAC-SHA256",
-      amzDate,
-      `${dateStamp}/auto/s3/aws4_request`,
-      canonicalRequestHash,
-    ].join("\n");
-
-    const kDate = crypto
-      .createHmac("sha256", `AWS4${this.secretAccessKey}`)
-      .update(dateStamp)
-      .digest();
-
-    const kRegion = crypto
-      .createHmac("sha256", kDate)
-      .update("auto")
-      .digest();
-
-    const kService = crypto
-      .createHmac("sha256", kRegion)
-      .update("s3")
-      .digest();
-
-    const kSigning = crypto
-      .createHmac("sha256", kService)
-      .update("aws4_request")
-      .digest();
-
-    const signature = crypto
-      .createHmac("sha256", kSigning)
-      .update(stringToSign)
-      .digest("hex");
-
-    const authHeader = [
-      `AWS4-HMAC-SHA256 Credential=${this.accessKeyId}/${dateStamp}/auto/s3/aws4_request`,
-      `SignedHeaders=${Object.keys(headers)
-        .map((k) => k.toLowerCase())
-        .sort()
-        .join(";")}`,
-      `Signature=${signature}`,
-    ].join(", ");
-
-    return {
-      ...headers,
-      Authorization: authHeader,
-      "X-Amz-Date": amzDate,
+    // Canonical headers: lowercase names, sorted, trimmed values.
+    const headers: Record<string, string> = {
+      host: this.host,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate,
     };
+    for (const [name, value] of Object.entries(extraHeaders)) {
+      headers[name.toLowerCase()] = value.trim();
+    }
+    const sortedHeaderNames = Object.keys(headers).sort();
+    const canonicalHeaders = sortedHeaderNames.map((name) => `${name}:${headers[name]}\n`).join("");
+    const signedHeaders = sortedHeaderNames.join(";");
+
+    const canonicalRequest = [method, canonicalPath, "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = ["AWS4-HMAC-SHA256", amzDate, credentialScope, sha256Hex(canonicalRequest)].join("\n");
+
+    const kDate = hmac(`AWS4${this.secretAccessKey}`, dateStamp);
+    const kRegion = hmac(kDate, region);
+    const kService = hmac(kRegion, service);
+    const kSigning = hmac(kService, "aws4_request");
+    const signature = createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+
+    const authorization =
+      `AWS4-HMAC-SHA256 Credential=${this.accessKeyId}/${credentialScope}, ` +
+      `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+    const requestHeaders: Record<string, string> = { ...headers, authorization };
+    delete requestHeaders.host; // fetch sets Host from the URL
+
+    return fetch(`https://${this.host}${canonicalPath}`, {
+      method,
+      headers: requestHeaders,
+      body: body as BodyInit | undefined,
+    });
   }
 
   async put(
     key: string,
-    data: Uint8Array | ArrayBuffer | Buffer,
-    options?: { httpMetadata?: R2HTTPMetadata }
-  ): Promise<R2Object> {
-    const path = `/${this.bucketName}/${key}`;
-    const method = "PUT";
+    data: Uint8Array | ArrayBuffer,
+    options?: { httpMetadata?: R2HTTPMetadata },
+  ): Promise<{ key: string; size: number; etag?: string }> {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const extraHeaders: Record<string, string> = {};
+    if (options?.httpMetadata?.contentType) extraHeaders["content-type"] = options.httpMetadata.contentType;
+    if (options?.httpMetadata?.cacheControl) extraHeaders["cache-control"] = options.httpMetadata.cacheControl;
 
-    const headers: Record<string, string> = {
-      Host: `${this.accountId}.r2.cloudflarestorage.com`,
-    };
-
-    if (options?.httpMetadata?.contentType) {
-      headers["Content-Type"] = options.httpMetadata.contentType;
+    const response = await this.signedFetch("PUT", key, bytes, extraHeaders);
+    if (!response.ok) {
+      throw new Error(`R2 upload failed: HTTP ${response.status} ${await response.text().catch(() => "")}`);
     }
-
-    if (options?.httpMetadata?.cacheControl) {
-      headers["Cache-Control"] = options.httpMetadata.cacheControl;
-    }
-
-    const signedHeaders = this.signRequest(method, path, headers);
-
-    try {
-      const response = await fetch(`${this.s3Endpoint}${path}`, {
-        method,
-        headers: signedHeaders,
-        body: data,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`R2 Upload Error: ${response.status} - ${errorText}`);
-      }
-
-      return {
-        key,
-        size: data instanceof Uint8Array ? data.length : Buffer.byteLength(data),
-        etag: response.headers.get("etag") || undefined,
-      };
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown error";
-      throw new Error(`R2 API Error: ${message}`);
-    }
+    return { key, size: bytes.byteLength, etag: response.headers.get("etag") ?? undefined };
   }
 
-  async delete(key: string): Promise<void> {
-    const path = `/${this.bucketName}/${key}`;
-    const method = "DELETE";
-
-    const headers: Record<string, string> = {
-      Host: `${this.accountId}.r2.cloudflarestorage.com`,
-    };
-
-    const signedHeaders = this.signRequest(method, path, headers);
-
-    try {
-      const response = await fetch(`${this.s3Endpoint}${path}`, {
-        method,
-        headers: signedHeaders,
-      });
-
-      if (!response.ok && response.status !== 404) {
-        throw new Error(`R2 Delete Error: ${response.status}`);
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown error";
-      throw new Error(`R2 API Error: ${message}`);
+  async get(key: string): Promise<R2ObjectBody | null> {
+    const response = await this.signedFetch("GET", key);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`R2 get failed: HTTP ${response.status}`);
     }
+    const body = new Uint8Array(await response.arrayBuffer());
+    return {
+      key,
+      body,
+      size: body.byteLength,
+      etag: response.headers.get("etag") ?? undefined,
+      httpMetadata: {
+        contentType: response.headers.get("content-type") ?? undefined,
+        cacheControl: response.headers.get("cache-control") ?? undefined,
+      },
+    };
   }
 
-  async get(key: string): Promise<Uint8Array | null> {
-    const path = `/${this.bucketName}/${key}`;
-    const method = "GET";
-
-    const headers: Record<string, string> = {
-      Host: `${this.accountId}.r2.cloudflarestorage.com`,
-    };
-
-    const signedHeaders = this.signRequest(method, path, headers);
-
-    try {
-      const response = await fetch(`${this.s3Endpoint}${path}`, {
-        method,
-        headers: signedHeaders,
-      });
-
-      if (response.status === 404) {
-        return null;
-      }
-
-      if (!response.ok) {
-        throw new Error(`R2 Get Error: ${response.status}`);
-      }
-
-      const buffer = await response.arrayBuffer();
-      return new Uint8Array(buffer);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown error";
-      throw new Error(`R2 API Error: ${message}`);
-    }
-  }
-
-  // Compatibility method for bulk operations
-  async deleteMultiple(keys: string[]): Promise<void> {
-    await Promise.all(keys.map((key) => this.delete(key)));
+  async delete(keys: string | string[]): Promise<void> {
+    const list = Array.isArray(keys) ? keys : [keys];
+    await Promise.all(
+      list.map(async (key) => {
+        const response = await this.signedFetch("DELETE", key);
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`R2 delete failed for ${key}: HTTP ${response.status}`);
+        }
+      }),
+    );
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface VerificationDoc {
   id: string;
@@ -29,28 +29,35 @@ export function AdminVerificationDashboard() {
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
+  const [reloadKey, setReloadKey] = useState(0);
+  const loadVerifications = useCallback(() => setReloadKey((key) => key + 1), []);
+
   useEffect(() => {
-    loadVerifications();
-  }, [filter]);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const params = new URLSearchParams({ status: filter });
+        const response = await fetch(`/api/admin/seller-verification?${params}`, {
+          credentials: "include"
+        });
+        if (cancelled) return;
+        if (!response.ok) throw new Error("Failed to load verifications");
 
-  const loadVerifications = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({ status: filter });
-      const response = await fetch(`/api/admin/seller-verification?${params}`, {
-        credentials: "include"
-      });
-
-      if (!response.ok) throw new Error("Failed to load verifications");
-
-      const data = await response.json() as {accounts?: SellerVerification[]};
-      setVerifications(data.accounts || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  };
+        const data = await response.json() as {accounts?: SellerVerification[]};
+        if (cancelled) return;
+        setVerifications(data.accounts || []);
+        setError("");
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [filter, reloadKey]);
 
   const handleAction = async (docId: string, action: "approve" | "reject", reason?: string) => {
     if (actionInProgress) return;

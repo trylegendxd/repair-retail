@@ -5,9 +5,10 @@ export const providerKinds=["repair_shop","independent_technician","parts_seller
 export type AccountRole=typeof accountRoles[number];
 
 export type MarketplaceAccount={
-  id:string;role:AccountRole;displayName:string;phone:string;city:string;region:string;countryCode:string;
+  id:string;email:string;role:AccountRole;displayName:string;phone:string;city:string;region:string;countryCode:string;
   latitude:number|null;longitude:number|null;providerKind:string;businessName:string;bio:string;serviceRadiusKm:number;
   sellerType:"customer"|"individual_seller"|"shop";isVerified:boolean;verificationStatus:"none"|"pending"|"approved"|"rejected";trustScore:number;
+  totalRepairs:number;successfulRepairs:number;
 };
 
 type RequestUser={email:string;displayName:string};
@@ -33,7 +34,7 @@ export function isSameOriginMutation(request:Request){
 }
 
 export async function findAccountByEmail(email:string){
-  const row=await getD1().prepare("SELECT id,role,display_name,phone,city,region,country_code,latitude,longitude,provider_kind,business_name,bio,service_radius_km,seller_type,is_verified,verification_status,trust_score FROM marketplace_accounts WHERE email=? LIMIT 1").bind(email).first<Record<string,unknown>>();
+  const row=await getD1().prepare("SELECT id,email,role,display_name,phone,city,region,country_code,latitude,longitude,provider_kind,business_name,bio,service_radius_km,seller_type,is_verified,verification_status,trust_score,total_repairs,successful_repairs FROM marketplace_accounts WHERE email=? LIMIT 1").bind(email).first<Record<string,unknown>>();
   return row?mapAccount(row):null;
 }
 
@@ -46,7 +47,7 @@ export async function accountForRequest(request:Request){
 export function mapAccount(row:Record<string,unknown>):MarketplaceAccount{
   const sellerType=String(row.seller_type??(row.role==="provider"?"shop":"customer"));
   const verificationStatus=String(row.verification_status??"none");
-  return {id:String(row.id),role:row.role as AccountRole,displayName:String(row.display_name),phone:String(row.phone??""),city:String(row.city),region:String(row.region??""),countryCode:String(row.country_code),latitude:row.latitude===null?null:Number(row.latitude),longitude:row.longitude===null?null:Number(row.longitude),providerKind:String(row.provider_kind??""),businessName:String(row.business_name??""),bio:String(row.bio??""),serviceRadiusKm:Number(row.service_radius_km)||50,sellerType:(sellerType==="individual_seller"||sellerType==="shop"?sellerType:"customer"),isVerified:Boolean(row.is_verified),verificationStatus:(verificationStatus==="pending"||verificationStatus==="approved"||verificationStatus==="rejected"?verificationStatus:"none"),trustScore:Number(row.trust_score)||0};
+  return {id:String(row.id),email:String(row.email??""),role:row.role as AccountRole,displayName:String(row.display_name),phone:String(row.phone??""),city:String(row.city),region:String(row.region??""),countryCode:String(row.country_code),latitude:row.latitude===null?null:Number(row.latitude),longitude:row.longitude===null?null:Number(row.longitude),providerKind:String(row.provider_kind??""),businessName:String(row.business_name??""),bio:String(row.bio??""),serviceRadiusKm:Number(row.service_radius_km)||50,sellerType:(sellerType==="individual_seller"||sellerType==="shop"?sellerType:"customer"),isVerified:Boolean(row.is_verified),verificationStatus:(verificationStatus==="pending"||verificationStatus==="approved"||verificationStatus==="rejected"?verificationStatus:"none"),trustScore:Number(row.trust_score)||0,totalRepairs:Number(row.total_repairs)||0,successfulRepairs:Number(row.successful_repairs)||0};
 }
 
 export const privateHeaders={"cache-control":"private, no-store","referrer-policy":"no-referrer","x-content-type-options":"nosniff"};

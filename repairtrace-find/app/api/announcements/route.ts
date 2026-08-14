@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { accountForRequest, isSameOriginMutation, privateHeaders } from "@/lib/account-auth";
 import { countries, deviceCategories, getModel, inferIssueFromProblem } from "@/lib/repair-catalog";
 import { clean, getBucket, getD1, uid } from "@/lib/server-marketplace";
+import type { D1PreparedStatement } from "@/lib/cloudflare-d1-api";
 
 type Row=Record<string,unknown>;
 const MAX_PHOTOS=5;const MAX_PHOTO_BYTES=8_000_000;const MAX_TOTAL_BYTES=25_000_000;

@@ -8,6 +8,6 @@ export async function GET(request:Request,context:{params:Promise<{id:string;pho
     const isOwner=row.owner_account_id===account.id;const hasAcceptedOffer=account.role==="provider"?Boolean(await getD1().prepare("SELECT 1 FROM repair_offers WHERE announcement_id=? AND provider_account_id=? AND status='accepted' LIMIT 1").bind(postId,account.id).first()):false;
     if(!isOwner&&!hasAcceptedOffer)return Response.json({error:"Not authorized to view this photo."},{status:403,headers:privateHeaders});
     const object=await getBucket().get(row.object_key);if(!object)return Response.json({error:"Photo not found."},{status:404,headers:privateHeaders});
-    const headers=new Headers(privateHeaders);headers.set("content-type",row.content_type);headers.set("content-security-policy","default-src 'none'; sandbox");headers.set("content-disposition",`inline; filename="repair-photo-${safePhotoId.slice(-8)}"`);headers.set("content-length",String(object.size));return new Response(object.body,{headers});
+    const headers=new Headers(privateHeaders);headers.set("content-type",row.content_type);headers.set("content-security-policy","default-src 'none'; sandbox");headers.set("content-disposition",`inline; filename="repair-photo-${safePhotoId.slice(-8)}"`);headers.set("content-length",String(object.size));return new Response(object.body as unknown as BodyInit,{headers});
   }catch(error){console.error("repair photo failed",error);return Response.json({error:"We could not load this repair photo."},{status:500,headers:privateHeaders});}
 }

@@ -20,9 +20,15 @@ export async function checkRateLimit(
     }
 
     await db
-      .prepare("INSERT INTO rate_limit_events (key, created_at) VALUES (?, CURRENT_TIMESTAMP)")
-      .bind(key)
+      .prepare("INSERT INTO rate_limit_events (id, key, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)")
+      .bind(`rl_${crypto.randomUUID()}`, key)
       .run();
+
+    // Opportunistic pruning so the table cannot grow without bound.
+    if (Math.random() < 0.02) {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      await db.prepare("DELETE FROM rate_limit_events WHERE created_at < ?").bind(cutoff).run();
+    }
 
     return { allowed: true, remaining: limit - current - 1 };
   } catch (error) {

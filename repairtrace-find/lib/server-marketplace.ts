@@ -58,7 +58,7 @@ export function getD1() {
 export function getBucket() {
   return initializeR2();
 }
-export function getPartnerKey(){return runtimeEnv().PARTNER_SYNC_KEY??"";}
+export function getPartnerKey(){return process.env.PARTNER_SYNC_KEY??"";}
 export const uid=(prefix:string)=>`${prefix}_${crypto.randomUUID().replaceAll("-","")}`;
 export const clean=(value:unknown,max=180)=>String(value??"").replace(/[\u0000-\u001f\u007f]+/g," ").replace(/\s+/g," ").trim().slice(0,max);
 export const roundMoney=(value:number)=>Math.round(value*100)/100;

@@ -8,6 +8,8 @@
  * For Vercel deployment, all API routes in app/api/ are used directly.
  */
 
-export default {
+const worker = {
   fetch: () => new Response("Not deployed on Cloudflare Workers", { status: 500 }),
 };
+
+export default worker;

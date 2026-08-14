@@ -1,9 +1,63 @@
-import { countries,getIssue,getModel } from "./repair-catalog";
+import { countries, getIssue, getModel } from "./repair-catalog";
+import { CloudflareD1API } from "./cloudflare-d1-api";
+import { CloudflareR2API } from "./cloudflare-r2-api";
 
-type RuntimeEnv={DB?:D1Database;BUCKET?:R2Bucket;PARTNER_SYNC_KEY?:string};
-function runtimeEnv(){return (globalThis as typeof globalThis&{__REPAIRTRACE_RUNTIME_ENV__?:RuntimeEnv}).__REPAIRTRACE_RUNTIME_ENV__??{};}
-export function getD1(){const db=runtimeEnv().DB;if(!db)throw new Error("Marketplace database is unavailable.");return db;}
-export function getBucket(){const bucket=runtimeEnv().BUCKET;if(!bucket)throw new Error("Marketplace photo storage is unavailable.");return bucket;}
+let d1Instance: CloudflareD1API | null = null;
+let r2Instance: CloudflareR2API | null = null;
+
+function initializeD1(): CloudflareD1API {
+  if (d1Instance) return d1Instance;
+
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const databaseId = process.env.CLOUDFLARE_DATABASE_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !databaseId || !apiToken) {
+    throw new Error(
+      "Marketplace database is unavailable. Missing Cloudflare configuration: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, or CLOUDFLARE_API_TOKEN"
+    );
+  }
+
+  d1Instance = new CloudflareD1API({
+    accountId,
+    databaseId,
+    apiToken,
+  });
+
+  return d1Instance;
+}
+
+function initializeR2(): CloudflareR2API {
+  if (r2Instance) return r2Instance;
+
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  const bucketName = process.env.R2_BUCKET_NAME;
+
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+    throw new Error(
+      "Marketplace photo storage is unavailable. Missing R2 configuration: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, or R2_BUCKET_NAME"
+    );
+  }
+
+  r2Instance = new CloudflareR2API({
+    accountId,
+    accessKeyId,
+    secretAccessKey,
+    bucketName,
+  });
+
+  return r2Instance;
+}
+
+export function getD1() {
+  return initializeD1();
+}
+
+export function getBucket() {
+  return initializeR2();
+}
 export function getPartnerKey(){return runtimeEnv().PARTNER_SYNC_KEY??"";}
 export const uid=(prefix:string)=>`${prefix}_${crypto.randomUUID().replaceAll("-","")}`;
 export const clean=(value:unknown,max=180)=>String(value??"").replace(/[\u0000-\u001f\u007f]+/g," ").replace(/\s+/g," ").trim().slice(0,max);
